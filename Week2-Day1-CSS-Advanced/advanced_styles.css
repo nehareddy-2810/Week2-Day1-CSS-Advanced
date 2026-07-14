@@ -1,0 +1,162 @@
+/* CSS Variables */
+
+:root{
+    --bg-color:#ffffff;
+    --text-color:#000000;
+    --nav-color:#333333;
+    --button-color:#0066ff;
+}
+
+/* Dark Theme */
+
+.dark-theme{
+    --bg-color:#1f1f1f;
+    --text-color:#ffffff;
+    --nav-color:#000000;
+    --button-color:#ff8800;
+}
+
+/* Smooth Scroll */
+
+html{
+    scroll-behavior:smooth;
+}
+
+/* Body */
+
+body{
+    margin:0;
+    background:var(--bg-color);
+    color:var(--text-color);
+    font-family:Arial,sans-serif;
+    transition:0.5s;
+}
+
+/* Sticky Navigation */
+
+nav{
+    position:sticky;
+    top:0;
+    background:var(--nav-color);
+    color:white;
+    padding:20px;
+    z-index:1000;
+}
+
+.container{
+    padding:20px;
+}
+
+/* Button */
+
+button{
+    background:var(--button-color);
+    color:white;
+    border:none;
+    padding:12px 25px;
+    cursor:pointer;
+    font-size:16px;
+    border-radius:5px;
+    transition:0.4s;
+}
+
+button:hover{
+    transform:scale(1.05);
+}
+
+/* Pseudo Elements */
+
+h1::before{
+    content:"★ ";
+    color:gold;
+}
+
+h1::after{
+    content:" ★";
+    color:gold;
+}
+
+/* Spinner */
+
+.spinner{
+    width:60px;
+    height:60px;
+
+    border:8px solid #dddddd;
+    border-top:8px solid blue;
+
+    border-radius:50%;
+
+    animation:spin 1s linear infinite;
+
+    margin-top:20px;
+}
+
+@keyframes spin{
+
+0%{
+transform:rotate(0deg);
+}
+
+100%{
+transform:rotate(360deg);
+}
+
+}
+
+/* Progress Bar */
+
+.progress{
+
+width:350px;
+height:25px;
+
+background:#dddddd;
+
+margin-top:20px;
+
+border-radius:20px;
+
+overflow:hidden;
+
+}
+
+.bar{
+
+height:25px;
+
+width:0%;
+
+background:green;
+
+animation:loading 5s forwards;
+
+}
+
+@keyframes loading{
+
+0%{
+width:0%;
+}
+
+100%{
+width:100%;
+}
+
+}
+
+/* Headings */
+
+h1{
+
+font-size:45px;
+
+margin-top:40px;
+
+}
+
+h2{
+
+margin-top:40px;
+
+}
