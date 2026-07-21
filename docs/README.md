@@ -28,4 +28,4 @@ https://opentdb.com/
 (Add screenshots after running the project.)
 
 ## Live Demo
-(Add your GitHub Pages link here after deployment.)
+[(Add your GitHub Pages link here after deployment.)](https://nehareddy-2810.github.io/Week2-Day1-CSS-Advanced/)
