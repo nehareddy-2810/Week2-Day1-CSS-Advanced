@@ -1,0 +1,27 @@
+# Create Branch
+git checkout -b feature/week-1-day-5
+
+# Check Branch
+git branch
+
+# Stage Files
+git add .
+
+# Commit
+git commit -m "feat: git-workflow week-1-day-5 complete"
+
+# Push Branch
+git push -u origin feature/week-1-day-5
+
+# Merge
+git checkout main
+git merge feature/week-1-day-5
+
+# Rebase
+git rebase main
+
+# Pull Latest
+git pull origin main
+
+# Push Changes
+git push origin main
