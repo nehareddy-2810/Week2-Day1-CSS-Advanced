@@ -27,7 +27,7 @@ class PlacementReadinessController extends Controller
             'git_quality' => 'required|numeric|min:0|max:100',
         ]);
 
-        $data['user_id'] = auth()->id() ?? 1;
+        $data['user_id'] = $request->user()->id;
 
         $data['placement_readiness'] =
             ($data['project_completion'] * 0.40) +
