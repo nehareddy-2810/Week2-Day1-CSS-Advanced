@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 class CiaController extends Controller
@@ -21,12 +22,27 @@ class CiaController extends Controller
         ]);
 
         $userId = (int) $request->user()->id;
+        $startedAt = microtime(true);
+
+        Log::channel('cia')->info('CIA skill-gap request started', [
+            'user_id' => $userId,
+        ]);
+
         $profile = $this->buildSkillProfile($userId);
 
         $analysis = $this->analyzeWithFallback(
             $validated['target_role'],
             $profile
         );
+
+        $durationMs = round((microtime(true) - $startedAt) * 1000, 2);
+
+        Log::channel('cia')->info('CIA skill-gap request completed', [
+            'user_id' => $userId,
+            'duration_ms' => $durationMs,
+            'profile_skills' => count($profile),
+            'score' => $analysis['score'] ?? null,
+        ]);
 
         return response()->json([
             ...$analysis,
@@ -166,12 +182,39 @@ class CiaController extends Controller
                     $normalized = $this->normalizeAnalysis($decoded);
 
                     if ($normalized !== null) {
+                        Log::channel('cia')->info(
+                            'CIA AI provider succeeded',
+                            [
+                                'provider' => 'groq',
+                            ]
+                        );
+
                         return $normalized;
                     }
+
+                    Log::channel('cia')->warning(
+                        'CIA Groq returned invalid analysis format'
+                    );
+                } else {
+                    Log::channel('cia')->warning(
+                        'CIA Groq request failed',
+                        [
+                            'status' => $response->status(),
+                        ]
+                    );
                 }
-            } catch (\Throwable) {
-                // Continue to OpenRouter fallback.
+            } catch (\Throwable $exception) {
+                Log::channel('cia')->warning(
+                    'CIA Groq request exception',
+                    [
+                        'exception' => get_class($exception),
+                    ]
+                );
             }
+        } else {
+            Log::channel('cia')->warning(
+                'CIA Groq provider unavailable: API key not configured'
+            );
         }
 
         /*
@@ -216,17 +259,48 @@ class CiaController extends Controller
                     $normalized = $this->normalizeAnalysis($decoded);
 
                     if ($normalized !== null) {
+                        Log::channel('cia')->info(
+                            'CIA AI provider succeeded',
+                            [
+                                'provider' => 'openrouter',
+                            ]
+                        );
+
                         return $normalized;
                     }
+
+                    Log::channel('cia')->warning(
+                        'CIA OpenRouter returned invalid analysis format'
+                    );
+                } else {
+                    Log::channel('cia')->warning(
+                        'CIA OpenRouter request failed',
+                        [
+                            'status' => $response->status(),
+                        ]
+                    );
                 }
-            } catch (\Throwable) {
-                // Continue to deterministic local fallback.
+            } catch (\Throwable $exception) {
+                Log::channel('cia')->warning(
+                    'CIA OpenRouter request exception',
+                    [
+                        'exception' => get_class($exception),
+                    ]
+                );
             }
+        } else {
+            Log::channel('cia')->warning(
+                'CIA OpenRouter provider unavailable: API key not configured'
+            );
         }
 
         /*
          * Final fallback: deterministic local analysis
          */
+        Log::channel('cia')->critical(
+            'CIA AI providers unavailable; deterministic local fallback used'
+        );
+
         return $this->fallbackAnalysis($profile);
     }
 
