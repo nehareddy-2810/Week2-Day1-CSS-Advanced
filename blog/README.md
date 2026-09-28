@@ -56,3 +56,11 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## CIA Career Skill-Gap Analysis
+
+The authenticated Career tab is available at `/cia-career/skill-gap`. Submit a target role to `POST /candidate/cia/career/skill-gap`; the endpoint reads only the signed-in candidate's completed lessons and quiz attempts, calculates quiz percentages per skill, and returns `{ gaps, score, priority_learning, skill_profile }`. Groq uses the OpenAI-compatible chat completions API with the `llama-3.3-70b-versatile` model when `GROQ_API_KEY` is configured. Network errors, provider errors, and invalid provider JSON use a deterministic local analysis instead.
+
+Set `GROQ_API_KEY` in the Laravel environment, then apply migrations with `php artisan migrate`. Learning evidence is stored in `candidate_lessons` (`user_id`, `lesson_title`, `skill`, `completed_at`) and `candidate_quiz_scores` (`user_id`, `quiz_title`, `skill`, `score`, `max_score`, `taken_at`). Only completed lesson rows and submitted quiz rows are included. Scores without valid positive maximums are ignored. In this Laravel project the input is structured relational data, so the route calls Groq directly rather than introducing a separate LlamaIndex document-indexing service.
+
+Build frontend assets with `npm run build`. Run focused coverage with `php artisan test --filter=CiaSkillGapTest`.
