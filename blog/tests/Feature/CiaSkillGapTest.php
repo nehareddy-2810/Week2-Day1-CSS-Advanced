@@ -25,7 +25,7 @@ class CiaSkillGapTest extends TestCase
         $this->insertQuiz($otherCandidate, 'React', 10, 10);
 
         $response = $this->actingAs($candidate)
-            ->postJson('/candidate/cia/career/skill-gap', ['target_role' => 'Backend Developer']);
+            ->postJson('/cia-career/skill-gap', ['target_role' => 'Backend Developer']);
 
         $response->assertOk()
             ->assertJsonPath('score', 70)
@@ -39,11 +39,11 @@ class CiaSkillGapTest extends TestCase
 
     public function test_skill_gap_endpoint_requires_authentication_and_a_target_role(): void
     {
-        $this->postJson('/candidate/cia/career/skill-gap', ['target_role' => 'Backend Developer'])
+        $this->postJson('/cia-career/skill-gap', ['target_role' => 'Backend Developer'])
             ->assertUnauthorized();
 
         $this->actingAs(User::factory()->create())
-            ->postJson('/candidate/cia/career/skill-gap', [])
+            ->postJson('/cia-career/skill-gap', [])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('target_role');
     }
@@ -68,7 +68,7 @@ class CiaSkillGapTest extends TestCase
         $this->insertQuiz($candidate, 'PHP', 6, 10);
 
         $this->actingAs($candidate)
-            ->postJson('/candidate/cia/career/skill-gap', ['target_role' => 'Backend Developer'])
+            ->postJson('/cia-career/skill-gap', ['target_role' => 'Backend Developer'])
             ->assertOk()
             ->assertJsonPath('score', 72)
             ->assertJsonPath('gaps.0.current', 62)
@@ -88,7 +88,7 @@ class CiaSkillGapTest extends TestCase
         $this->insertQuiz($candidate, 'PHP', 4, 10);
 
         $this->actingAs($candidate)
-            ->postJson('/candidate/cia/career/skill-gap', ['target_role' => 'Backend Developer'])
+            ->postJson('/cia-career/skill-gap', ['target_role' => 'Backend Developer'])
             ->assertOk()
             ->assertJsonPath('score', 40)
             ->assertJsonPath('gaps.0.skill', 'PHP')
