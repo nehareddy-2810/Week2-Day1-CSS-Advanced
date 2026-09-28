@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CiaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PlacementReadinessController;
+use App\Http\Controllers\CareerIntelligenceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -23,6 +24,7 @@ Route::get('/dashboard', function () {
 
 // Profile
 Route::middleware('auth')->group(function () {
+
     Route::get('/profile', [ProfileController::class, 'edit'])
         ->name('profile.edit');
 
@@ -44,6 +46,22 @@ Route::middleware('auth')->group(function () {
         '/cia-career/readiness',
         [PlacementReadinessController::class, 'calculate']
     )->name('cia-career.readiness');
+
+    // W10D3 - Career Intelligence Report
+    Route::post(
+        '/career-intelligence/generate',
+        [CareerIntelligenceController::class, 'generate']
+    )->name('career-intelligence.generate');
+
+    Route::get(
+        '/career-intelligence/{report}',
+        [CareerIntelligenceController::class, 'show']
+    )->name('career-intelligence.show');
+
+    Route::get(
+        '/career-intelligence/{report}/download',
+        [CareerIntelligenceController::class, 'download']
+    )->name('career-intelligence.download');
 });
 
 require __DIR__.'/auth.php';
