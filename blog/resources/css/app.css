@@ -1,3 +1,52 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+	--cia-ink: #18312d;
+	--cia-muted: #65736e;
+	--cia-paper: #f3f5ef;
+	--cia-panel: #fffefa;
+	--cia-line: #dce3d9;
+	--cia-green: #16735f;
+	--cia-coral: #db725b;
+}
+
+.career-page {
+	min-height: calc(100vh - 4rem);
+	color: var(--cia-ink);
+	background-color: var(--cia-paper);
+	background-image: radial-gradient(#c8d4c8 0.7px, transparent 0.7px);
+	background-size: 18px 18px;
+}
+
+.career-shell { max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+.career-topline { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--cia-muted); font-size: .8rem; font-weight: 700; text-transform: uppercase; }
+.career-title { max-width: 760px; margin: 1.25rem 0 .6rem; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(2rem, 2rem, 2.75rem); font-weight: 500; line-height: 1.08; }
+.career-intro { max-width: 650px; color: var(--cia-muted); line-height: 1.65; }
+.career-tabs { display: flex; gap: 1.5rem; margin-top: 2rem; border-bottom: 1px solid var(--cia-line); }
+.career-tab { padding: .85rem .15rem; border-bottom: 2px solid var(--cia-green); color: var(--cia-green); font-size: .9rem; font-weight: 700; }
+.career-grid { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(0, 1.5fr); gap: 1.5rem; margin-top: 1.5rem; }
+.career-panel { min-width: 0; padding: 1.35rem; border: 1px solid var(--cia-line); border-radius: 6px; background: var(--cia-panel); }
+.career-panel h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.career-label { display: block; margin: 1.2rem 0 .4rem; font-size: .82rem; font-weight: 700; }
+.career-select { width: 100%; min-height: 2.75rem; border: 1px solid #bac8be; border-radius: 4px; background: white; color: var(--cia-ink); }
+.career-submit { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; width: 100%; min-height: 2.75rem; margin-top: .9rem; border: 0; border-radius: 4px; background: var(--cia-green); color: white; font-weight: 700; }
+.career-submit:disabled { cursor: wait; opacity: .65; }
+.career-status { min-height: 1.4rem; margin-top: .8rem; color: var(--cia-muted); font-size: .82rem; }
+.career-status[data-state="error"] { color: #a33d2c; }
+.career-summary { display: flex; align-items: baseline; gap: .55rem; margin: .35rem 0 1rem; }
+.career-score { color: var(--cia-green); font-family: Georgia, 'Times New Roman', serif; font-size: 2.7rem; line-height: 1; }
+.career-score-caption { color: var(--cia-muted); font-size: .82rem; }
+.career-chart-wrap { position: relative; min-height: 290px; }
+.career-results { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem; }
+.career-list { display: grid; gap: .8rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+.career-list li { display: grid; gap: .2rem; padding-left: .8rem; border-left: 2px solid var(--cia-coral); }
+.career-list strong { font-size: .88rem; }
+.career-list span, .career-empty { color: var(--cia-muted); font-size: .82rem; line-height: 1.5; }
+@media (max-width: 700px) {
+	.career-shell { padding: 1.5rem 1rem 3rem; }
+	.career-grid, .career-results { grid-template-columns: 1fr; }
+	.career-topline { align-items: flex-start; flex-direction: column; }
+	.career-chart-wrap { min-height: 250px; }
+}
