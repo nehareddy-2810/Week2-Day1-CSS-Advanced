@@ -22,7 +22,11 @@ class CiaController extends Controller
 
         $userId = (int) $request->user()->id;
         $profile = $this->buildSkillProfile($userId);
-        $analysis = $this->analyzeWithGroq($validated['target_role'], $profile);
+
+        $analysis = $this->analyzeWithFallback(
+            $validated['target_role'],
+            $profile
+        );
 
         return response()->json([
             ...$analysis,
@@ -45,13 +49,20 @@ class CiaController extends Controller
             ->get();
 
         $skills = [];
+
         foreach ($completedLessons as $lesson) {
             $skill = trim((string) $lesson->skill);
+
             if ($skill === '') {
                 continue;
             }
 
-            $skills[$skill] ??= ['skill' => $skill, 'lessons_completed' => 0, 'quiz_scores' => []];
+            $skills[$skill] ??= [
+                'skill' => $skill,
+                'lessons_completed' => 0,
+                'quiz_scores' => [],
+            ];
+
             $skills[$skill]['lessons_completed']++;
         }
 
@@ -59,20 +70,36 @@ class CiaController extends Controller
             $skill = trim((string) $quiz->skill);
             $maxScore = (float) $quiz->max_score;
             $score = (float) $quiz->score;
-            if ($skill === '' || $maxScore <= 0 || $score < 0 || $score > $maxScore) {
+
+            if (
+                $skill === '' ||
+                $maxScore <= 0 ||
+                $score < 0 ||
+                $score > $maxScore
+            ) {
                 continue;
             }
 
-            $skills[$skill] ??= ['skill' => $skill, 'lessons_completed' => 0, 'quiz_scores' => []];
-            $skills[$skill]['quiz_scores'][] = ($score / $maxScore) * 100;
+            $skills[$skill] ??= [
+                'skill' => $skill,
+                'lessons_completed' => 0,
+                'quiz_scores' => [],
+            ];
+
+            $skills[$skill]['quiz_scores'][] =
+                ($score / $maxScore) * 100;
         }
 
         $profile = [];
+
         foreach ($skills as $skill) {
             $scores = $skill['quiz_scores'];
+
             $profile[] = [
                 'skill' => $skill['skill'],
-                'score' => $scores ? round(array_sum($scores) / count($scores)) : 0,
+                'score' => $scores
+                    ? round(array_sum($scores) / count($scores))
+                    : 0,
                 'lessons_completed' => $skill['lessons_completed'],
                 'quizzes_completed' => count($scores),
             ];
@@ -81,83 +108,194 @@ class CiaController extends Controller
         return $profile;
     }
 
-    private function analyzeWithGroq(string $targetRole, array $profile): array
-    {
-        $apiKey = config('services.groq.api_key');
-        if (!$apiKey) {
-            return $this->fallbackAnalysis($profile);
-        }
+    private function analyzeWithFallback(
+        string $targetRole,
+        array $profile
+    ): array {
+        $messages = [
+            [
+                'role' => 'system',
+                'content' =>
+                    'Analyze only the supplied candidate skill profile against the target role. ' .
+                    'Return JSON only with gaps (array of objects with skill, current, required), ' .
+                    'score (integer 0-100), and priority_learning (array of short strings). ' .
+                    'Use current values from the profile; do not invent candidate evidence. ' .
+                    'Return an empty gaps array when there is no profile data.',
+            ],
+            [
+                'role' => 'user',
+                'content' => json_encode([
+                    'target_role' => $targetRole,
+                    'skill_profile' => $profile,
+                ], JSON_THROW_ON_ERROR),
+            ],
+        ];
 
-        try {
-            $response = Http::withToken($apiKey)
-                ->acceptJson()
-                ->timeout(20)
-                ->post('https://api.groq.com/openai/v1/chat/completions', [
-                    'model' => 'llama-3.3-70b-versatile',
-                    'temperature' => 0.2,
-                    'response_format' => ['type' => 'json_object'],
-                    'messages' => [
-                        [
-                            'role' => 'system',
-                            'content' => 'Analyze only the supplied candidate skill profile against the target role. Return JSON only with gaps (array of objects with skill, current, required), score (integer 0-100), and priority_learning (array of short strings). Use current values from the profile; do not invent candidate evidence. Return an empty gaps array when there is no profile data.',
-                        ],
-                        [
-                            'role' => 'user',
-                            'content' => json_encode([
-                                'target_role' => $targetRole,
-                                'skill_profile' => $profile,
-                            ], JSON_THROW_ON_ERROR),
-                        ],
-                    ],
-                ]);
+        /*
+         * Primary provider: Groq
+         */
+        $groqKey = config('services.groq.api_key');
 
-            if (!$response->successful()) {
-                return $this->fallbackAnalysis($profile);
+        if ($groqKey) {
+            try {
+                $response = Http::withToken($groqKey)
+                    ->acceptJson()
+                    ->connectTimeout(5)
+                    ->timeout(10)
+                    ->post(
+                        'https://api.groq.com/openai/v1/chat/completions',
+                        [
+                            'model' => 'llama-3.3-70b-versatile',
+                            'temperature' => 0.2,
+                            'response_format' => [
+                                'type' => 'json_object',
+                            ],
+                            'messages' => $messages,
+                        ]
+                    );
+
+                if ($response->successful()) {
+                    $content = $response->json(
+                        'choices.0.message.content'
+                    );
+
+                    $decoded = is_string($content)
+                        ? json_decode($content, true)
+                        : null;
+
+                    $normalized = $this->normalizeAnalysis($decoded);
+
+                    if ($normalized !== null) {
+                        return $normalized;
+                    }
+                }
+            } catch (\Throwable) {
+                // Continue to OpenRouter fallback.
             }
-
-            $content = $response->json('choices.0.message.content');
-            $decoded = is_string($content) ? json_decode($content, true) : null;
-
-            return $this->normalizeAnalysis($decoded) ?? $this->fallbackAnalysis($profile);
-        } catch (\Throwable) {
-            return $this->fallbackAnalysis($profile);
         }
+
+        /*
+         * Secondary provider: OpenRouter
+         */
+        $openRouterKey = config('services.openrouter.api_key');
+
+        if ($openRouterKey) {
+            try {
+                $response = Http::withToken($openRouterKey)
+                    ->withHeaders([
+                        'HTTP-Referer' => config('app.url'),
+                        'X-Title' => 'CIA Career Intelligence',
+                    ])
+                    ->acceptJson()
+                    ->connectTimeout(5)
+                    ->timeout(10)
+                    ->post(
+                        'https://openrouter.ai/api/v1/chat/completions',
+                        [
+                            'model' => config(
+                                'services.openrouter.model',
+                                'meta-llama/llama-3.3-70b-instruct'
+                            ),
+                            'temperature' => 0.2,
+                            'response_format' => [
+                                'type' => 'json_object',
+                            ],
+                            'messages' => $messages,
+                        ]
+                    );
+
+                if ($response->successful()) {
+                    $content = $response->json(
+                        'choices.0.message.content'
+                    );
+
+                    $decoded = is_string($content)
+                        ? json_decode($content, true)
+                        : null;
+
+                    $normalized = $this->normalizeAnalysis($decoded);
+
+                    if ($normalized !== null) {
+                        return $normalized;
+                    }
+                }
+            } catch (\Throwable) {
+                // Continue to deterministic local fallback.
+            }
+        }
+
+        /*
+         * Final fallback: deterministic local analysis
+         */
+        return $this->fallbackAnalysis($profile);
     }
 
     private function normalizeAnalysis(mixed $analysis): ?array
     {
-        if (!is_array($analysis)
-            || !is_array($analysis['gaps'] ?? null)
-            || !is_numeric($analysis['score'] ?? null)
-            || !is_array($analysis['priority_learning'] ?? null)) {
+        if (
+            !is_array($analysis) ||
+            !is_array($analysis['gaps'] ?? null) ||
+            !is_numeric($analysis['score'] ?? null) ||
+            !is_array($analysis['priority_learning'] ?? null)
+        ) {
             return null;
         }
 
         $gaps = [];
+
         foreach ($analysis['gaps'] as $gap) {
-            if (!is_array($gap)
-                || !is_string($gap['skill'] ?? null)
-                || !is_numeric($gap['current'] ?? null)
-                || !is_numeric($gap['required'] ?? null)) {
+            if (
+                !is_array($gap) ||
+                !is_string($gap['skill'] ?? null) ||
+                !is_numeric($gap['current'] ?? null) ||
+                !is_numeric($gap['required'] ?? null)
+            ) {
                 return null;
             }
 
             $gaps[] = [
-                'skill' => mb_substr(trim($gap['skill']), 0, 100),
-                'current' => min(100, max(0, (float) $gap['current'])),
-                'required' => min(100, max(0, (float) $gap['required'])),
+                'skill' => mb_substr(
+                    trim($gap['skill']),
+                    0,
+                    100
+                ),
+                'current' => min(
+                    100,
+                    max(0, (float) $gap['current'])
+                ),
+                'required' => min(
+                    100,
+                    max(0, (float) $gap['required'])
+                ),
             ];
         }
 
-        $priorities = array_values(array_filter(
-            $analysis['priority_learning'],
-            fn ($item) => is_string($item) && trim($item) !== ''
-        ));
+        $priorities = array_values(
+            array_filter(
+                $analysis['priority_learning'],
+                fn ($item) =>
+                    is_string($item) && trim($item) !== ''
+            )
+        );
 
         return [
             'gaps' => $gaps,
-            'score' => (int) min(100, max(0, round((float) $analysis['score']))),
-            'priority_learning' => array_slice(array_map(fn ($item) => mb_substr(trim($item), 0, 240), $priorities), 0, 5),
+            'score' => (int) min(
+                100,
+                max(
+                    0,
+                    round((float) $analysis['score'])
+                )
+            ),
+            'priority_learning' => array_slice(
+                array_map(
+                    fn ($item) =>
+                        mb_substr(trim($item), 0, 240),
+                    $priorities
+                ),
+                0,
+                5
+            ),
         ];
     }
 
@@ -165,26 +303,45 @@ class CiaController extends Controller
     {
         $gaps = [];
         $priorities = [];
+
         foreach ($profile as $skill) {
             $score = (int) $skill['score'];
+
             if ($score < 75) {
-                $gaps[] = ['skill' => $skill['skill'], 'current' => $score, 'required' => 75];
-                $priorities[] = 'Strengthen ' . $skill['skill'] . ' with focused practice and a follow-up quiz.';
+                $gaps[] = [
+                    'skill' => $skill['skill'],
+                    'current' => $score,
+                    'required' => 75,
+                ];
+
+                $priorities[] =
+                    'Strengthen ' .
+                    $skill['skill'] .
+                    ' with focused practice and a follow-up quiz.';
             }
         }
 
         if (!$profile) {
-            $priorities[] = 'Complete lessons and quizzes to establish a skill baseline.';
+            $priorities[] =
+                'Complete lessons and quizzes to establish a skill baseline.';
         }
 
         $score = $profile
-            ? (int) round(array_sum(array_column($profile, 'score')) / count($profile))
+            ? (int) round(
+                array_sum(
+                    array_column($profile, 'score')
+                ) / count($profile)
+            )
             : 0;
 
         return [
             'gaps' => $gaps,
             'score' => $score,
-            'priority_learning' => array_slice($priorities, 0, 5),
+            'priority_learning' => array_slice(
+                $priorities,
+                0,
+                5
+            ),
         ];
     }
 }

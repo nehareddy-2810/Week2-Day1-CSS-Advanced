@@ -7,12 +7,10 @@ use App\Http\Controllers\PlacementReadinessController;
 use App\Http\Controllers\CareerIntelligenceController;
 use App\Http\Controllers\InternshipMatchingController;
 
-
- Route::get(
+Route::get(
     '/internship-matches',
     [InternshipMatchingController::class, 'index']
 )->name('internship-matches');
-
 
 // Home
 Route::get('/', function () {
@@ -42,6 +40,12 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/cia-career', [CiaController::class, 'index'])
         ->name('cia-career');
+
+    // W11D2 - CIA Skill Gap with Groq -> OpenRouter fallback
+    Route::post(
+        '/cia-career/skill-gap',
+        [CiaController::class, 'skillGap']
+    )->name('cia-career.skill-gap');
 
     // W10D2 - Placement & Interview Readiness
     Route::post(
