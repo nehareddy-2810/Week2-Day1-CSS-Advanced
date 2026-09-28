@@ -1,0 +1,421 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\View\View;
+
+class CiaController extends Controller
+{
+    public function index(): View
+    {
+        return view('cia-career.skill-gap');
+    }
+
+    public function skillGap(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'target_role' => ['required', 'string', 'max:100'],
+        ]);
+
+        $userId = (int) $request->user()->id;
+        $startedAt = microtime(true);
+
+        Log::channel('cia')->info('CIA skill-gap request started', [
+            'user_id' => $userId,
+        ]);
+
+        $profile = $this->buildSkillProfile($userId);
+
+        $analysis = $this->analyzeWithFallback(
+            $validated['target_role'],
+            $profile
+        );
+
+        $durationMs = round((microtime(true) - $startedAt) * 1000, 2);
+
+        Log::channel('cia')->info('CIA skill-gap request completed', [
+            'user_id' => $userId,
+            'duration_ms' => $durationMs,
+            'profile_skills' => count($profile),
+            'score' => $analysis['score'] ?? null,
+        ]);
+
+        return response()->json([
+            ...$analysis,
+            'skill_profile' => $profile,
+        ]);
+    }
+
+    private function buildSkillProfile(int $userId): array
+    {
+        $completedLessons = \DB::table('candidate_lessons')
+            ->where('user_id', $userId)
+            ->whereNotNull('completed_at')
+            ->select(['skill', 'lesson_title'])
+            ->get();
+
+        $quizScores = \DB::table('candidate_quiz_scores')
+            ->where('user_id', $userId)
+            ->whereNotNull('taken_at')
+            ->select(['skill', 'score', 'max_score'])
+            ->get();
+
+        $skills = [];
+
+        foreach ($completedLessons as $lesson) {
+            $skill = trim((string) $lesson->skill);
+
+            if ($skill === '') {
+                continue;
+            }
+
+            $skills[$skill] ??= [
+                'skill' => $skill,
+                'lessons_completed' => 0,
+                'quiz_scores' => [],
+            ];
+
+            $skills[$skill]['lessons_completed']++;
+        }
+
+        foreach ($quizScores as $quiz) {
+            $skill = trim((string) $quiz->skill);
+            $maxScore = (float) $quiz->max_score;
+            $score = (float) $quiz->score;
+
+            if (
+                $skill === '' ||
+                $maxScore <= 0 ||
+                $score < 0 ||
+                $score > $maxScore
+            ) {
+                continue;
+            }
+
+            $skills[$skill] ??= [
+                'skill' => $skill,
+                'lessons_completed' => 0,
+                'quiz_scores' => [],
+            ];
+
+            $skills[$skill]['quiz_scores'][] =
+                ($score / $maxScore) * 100;
+        }
+
+        $profile = [];
+
+        foreach ($skills as $skill) {
+            $scores = $skill['quiz_scores'];
+
+            $profile[] = [
+                'skill' => $skill['skill'],
+                'score' => $scores
+                    ? round(array_sum($scores) / count($scores))
+                    : 0,
+                'lessons_completed' => $skill['lessons_completed'],
+                'quizzes_completed' => count($scores),
+            ];
+        }
+
+        return $profile;
+    }
+
+    private function analyzeWithFallback(
+        string $targetRole,
+        array $profile
+    ): array {
+        $messages = [
+            [
+                'role' => 'system',
+                'content' =>
+                    'Analyze only the supplied candidate skill profile against the target role. ' .
+                    'Return JSON only with gaps (array of objects with skill, current, required), ' .
+                    'score (integer 0-100), and priority_learning (array of short strings). ' .
+                    'Use current values from the profile; do not invent candidate evidence. ' .
+                    'Return an empty gaps array when there is no profile data.',
+            ],
+            [
+                'role' => 'user',
+                'content' => json_encode([
+                    'target_role' => $targetRole,
+                    'skill_profile' => $profile,
+                ], JSON_THROW_ON_ERROR),
+            ],
+        ];
+
+        /*
+         * Primary provider: Groq
+         */
+        $groqKey = config('services.groq.api_key');
+
+        if ($groqKey) {
+            try {
+                $response = Http::withToken($groqKey)
+                    ->acceptJson()
+                    ->connectTimeout(5)
+                    ->timeout(10)
+                    ->post(
+                        'https://api.groq.com/openai/v1/chat/completions',
+                        [
+                            'model' => 'llama-3.3-70b-versatile',
+                            'temperature' => 0.2,
+                            'response_format' => [
+                                'type' => 'json_object',
+                            ],
+                            'messages' => $messages,
+                        ]
+                    );
+
+                if ($response->successful()) {
+                    $content = $response->json(
+                        'choices.0.message.content'
+                    );
+
+                    $decoded = is_string($content)
+                        ? json_decode($content, true)
+                        : null;
+
+                    $normalized = $this->normalizeAnalysis($decoded);
+
+                    if ($normalized !== null) {
+                        Log::channel('cia')->info(
+                            'CIA AI provider succeeded',
+                            [
+                                'provider' => 'groq',
+                            ]
+                        );
+
+                        return $normalized;
+                    }
+
+                    Log::channel('cia')->warning(
+                        'CIA Groq returned invalid analysis format'
+                    );
+                } else {
+                    Log::channel('cia')->warning(
+                        'CIA Groq request failed',
+                        [
+                            'status' => $response->status(),
+                        ]
+                    );
+                }
+            } catch (\Throwable $exception) {
+                Log::channel('cia')->warning(
+                    'CIA Groq request exception',
+                    [
+                        'exception' => get_class($exception),
+                    ]
+                );
+            }
+        } else {
+            Log::channel('cia')->warning(
+                'CIA Groq provider unavailable: API key not configured'
+            );
+        }
+
+        /*
+         * Secondary provider: OpenRouter
+         */
+        $openRouterKey = config('services.openrouter.api_key');
+
+        if ($openRouterKey) {
+            try {
+                $response = Http::withToken($openRouterKey)
+                    ->withHeaders([
+                        'HTTP-Referer' => config('app.url'),
+                        'X-Title' => 'CIA Career Intelligence',
+                    ])
+                    ->acceptJson()
+                    ->connectTimeout(5)
+                    ->timeout(10)
+                    ->post(
+                        'https://openrouter.ai/api/v1/chat/completions',
+                        [
+                            'model' => config(
+                                'services.openrouter.model',
+                                'meta-llama/llama-3.3-70b-instruct'
+                            ),
+                            'temperature' => 0.2,
+                            'response_format' => [
+                                'type' => 'json_object',
+                            ],
+                            'messages' => $messages,
+                        ]
+                    );
+
+                if ($response->successful()) {
+                    $content = $response->json(
+                        'choices.0.message.content'
+                    );
+
+                    $decoded = is_string($content)
+                        ? json_decode($content, true)
+                        : null;
+
+                    $normalized = $this->normalizeAnalysis($decoded);
+
+                    if ($normalized !== null) {
+                        Log::channel('cia')->info(
+                            'CIA AI provider succeeded',
+                            [
+                                'provider' => 'openrouter',
+                            ]
+                        );
+
+                        return $normalized;
+                    }
+
+                    Log::channel('cia')->warning(
+                        'CIA OpenRouter returned invalid analysis format'
+                    );
+                } else {
+                    Log::channel('cia')->warning(
+                        'CIA OpenRouter request failed',
+                        [
+                            'status' => $response->status(),
+                        ]
+                    );
+                }
+            } catch (\Throwable $exception) {
+                Log::channel('cia')->warning(
+                    'CIA OpenRouter request exception',
+                    [
+                        'exception' => get_class($exception),
+                    ]
+                );
+            }
+        } else {
+            Log::channel('cia')->warning(
+                'CIA OpenRouter provider unavailable: API key not configured'
+            );
+        }
+
+        /*
+         * Final fallback: deterministic local analysis
+         */
+        Log::channel('cia')->critical(
+            'CIA AI providers unavailable; deterministic local fallback used'
+        );
+
+        return $this->fallbackAnalysis($profile);
+    }
+
+    private function normalizeAnalysis(mixed $analysis): ?array
+    {
+        if (
+            !is_array($analysis) ||
+            !is_array($analysis['gaps'] ?? null) ||
+            !is_numeric($analysis['score'] ?? null) ||
+            !is_array($analysis['priority_learning'] ?? null)
+        ) {
+            return null;
+        }
+
+        $gaps = [];
+
+        foreach ($analysis['gaps'] as $gap) {
+            if (
+                !is_array($gap) ||
+                !is_string($gap['skill'] ?? null) ||
+                !is_numeric($gap['current'] ?? null) ||
+                !is_numeric($gap['required'] ?? null)
+            ) {
+                return null;
+            }
+
+            $gaps[] = [
+                'skill' => mb_substr(
+                    trim($gap['skill']),
+                    0,
+                    100
+                ),
+                'current' => min(
+                    100,
+                    max(0, (float) $gap['current'])
+                ),
+                'required' => min(
+                    100,
+                    max(0, (float) $gap['required'])
+                ),
+            ];
+        }
+
+        $priorities = array_values(
+            array_filter(
+                $analysis['priority_learning'],
+                fn ($item) =>
+                    is_string($item) && trim($item) !== ''
+            )
+        );
+
+        return [
+            'gaps' => $gaps,
+            'score' => (int) min(
+                100,
+                max(
+                    0,
+                    round((float) $analysis['score'])
+                )
+            ),
+            'priority_learning' => array_slice(
+                array_map(
+                    fn ($item) =>
+                        mb_substr(trim($item), 0, 240),
+                    $priorities
+                ),
+                0,
+                5
+            ),
+        ];
+    }
+
+    private function fallbackAnalysis(array $profile): array
+    {
+        $gaps = [];
+        $priorities = [];
+
+        foreach ($profile as $skill) {
+            $score = (int) $skill['score'];
+
+            if ($score < 75) {
+                $gaps[] = [
+                    'skill' => $skill['skill'],
+                    'current' => $score,
+                    'required' => 75,
+                ];
+
+                $priorities[] =
+                    'Strengthen ' .
+                    $skill['skill'] .
+                    ' with focused practice and a follow-up quiz.';
+            }
+        }
+
+        if (!$profile) {
+            $priorities[] =
+                'Complete lessons and quizzes to establish a skill baseline.';
+        }
+
+        $score = $profile
+            ? (int) round(
+                array_sum(
+                    array_column($profile, 'score')
+                ) / count($profile)
+            )
+            : 0;
+
+        return [
+            'gaps' => $gaps,
+            'score' => $score,
+            'priority_learning' => array_slice(
+                $priorities,
+                0,
+                5
+            ),
+        ];
+    }
+}
