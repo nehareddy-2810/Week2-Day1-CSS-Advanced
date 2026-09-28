@@ -5,12 +5,14 @@ use App\Http\Controllers\CiaController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PlacementReadinessController;
 use App\Http\Controllers\CareerIntelligenceController;
+use App\Http\Controllers\InternshipMatchingController;
 
-/*
-|--------------------------------------------------------------------------
-| Web Routes
-|--------------------------------------------------------------------------
-*/
+
+ Route::get(
+    '/internship-matches',
+    [InternshipMatchingController::class, 'index']
+)->name('internship-matches');
+
 
 // Home
 Route::get('/', function () {
